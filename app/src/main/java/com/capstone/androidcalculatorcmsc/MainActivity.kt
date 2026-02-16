@@ -16,8 +16,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
+import androidx.compose.ui.unit.*
+
 
 // App entry point — launches the Compose screen.
 class MainActivity : ComponentActivity() {
@@ -28,7 +28,7 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-// Tiny container for “expression = result” history rows.
+// Tiny container for "expression = result" history rows.
 class CalcHistory(
     val historyExpression: String,
     val historyResult: String
@@ -69,8 +69,25 @@ fun CalculatorScreen() {
     var expression by remember { mutableStateOf("") }   //current expression
     var displayText by remember { mutableStateOf("0") }      // what user sees
     var expressionEnded by remember { mutableStateOf(false) }   //tracks when the expression ends
+    var showAdvancedMode by remember { mutableStateOf(false)} //determines if it's in advanced mode or not
     var history by remember { mutableStateOf(listOf<CalcHistory>()) }
-    var showHistory by remember { mutableStateOf(false) }
+    var showHistory by remember { mutableStateOf(false) } //determines if history is showing or not
+
+    //formats a double into a usable String
+    fun Double.formatNumber() : String {
+        return if (this.isNaN() || this.isInfinite()) {
+            "Error"
+        } else
+            String.format("%.8f", this).trimEnd('0').trimEnd('.')
+    }
+
+    //formats to make a String compatible with exp4j
+    fun String.formatToExp4j() : String {
+        return this.replace("×", "*")
+            .replace("÷", "/")
+            .replace("π", PI.toString())
+            .replace("e", E.toString())
+    }
 
     // Adds digits (or decimal) to the current expression
     fun appendNumber(num: String) {
@@ -83,13 +100,37 @@ fun CalculatorScreen() {
         displayText = expression.ifEmpty{"0"}
     }
 
-    //Adds an operator to the expression when valid
+    //adds an operator to the expression when valid
     fun appendOperator(oper : String) {
-        if (expression.isNotEmpty() && (expression.last().isDigit() || expression.last() == ')')) {
+        if (expression.isNotEmpty() && (expression.last().isDigit() ||
+                    expression.last() == ')' || expression.last() == 'π' || expression.last() == 'e')) {
             expression += oper
             displayText = expression
         }
         expressionEnded = false //allows the expression to continue
+    }
+
+    //adds a function that uses opening parentheses ex. sin
+    fun appendFunction(func : String) {
+        if (expressionEnded) {
+            expression = "$func("
+            expressionEnded = false
+        } else {
+            expression += "$func("
+        }
+        displayText = expression
+        expressionEnded = false //allows the expression to continue
+    }
+
+    //adds a constant to the expression ex. pi
+    fun appendConstant(const : String) {
+        if (expressionEnded) {
+            expression = const
+        } else {
+            expression += const
+        }
+        displayText = expression
+        expressionEnded = false
     }
 
     //Keeps track of parentheses used in the expression and adds open/close
@@ -115,18 +156,42 @@ fun CalculatorScreen() {
         expressionEnded = false
     }
 
-    //formats a double into a usable String
-    fun Double.formatNumber() : String {
-        return if (this.isNaN() || this.isInfinite()) {
-            "Error"
-        } else
-            String.format("%.8f", this).trimEnd('0').trimEnd('.')
+    //calculates a numbers reciprocal
+    fun reciprocal() {
+        val value = displayText.toDoubleOrNull()
+        if (value == null) {
+            return
+        }
+        val result = 1.0 / value
+        expression = result.formatNumber()
+        displayText = expression
+        expressionEnded = true
     }
 
-    //formats to make a String compatible with exp4j
-    fun String.formatToExp4j() : String {
-        return this.replace("×", "*")
-            .replace("÷", "/")
+    //toggles between positive and negative
+    fun toggleSign() {
+        if (expression.isEmpty() || expression == "0") return
+
+        //if expression is just a number
+        if (expressionEnded || expression.toDoubleOrNull() != null) {
+            val value = expression.toDoubleOrNull()
+            if (value != null) {
+                expression = (-value).formatNumber()
+                displayText = expression
+            }
+        } else {
+            //for expressions, negate the last number
+            val lastNumberPosition = expression.indexOfLast { it in setOf('+','-','×','÷','(') } + 1
+
+            if (lastNumberPosition < expression.length) {
+                val lastNumber = expression.substring(lastNumberPosition).toDoubleOrNull()
+                if (lastNumber != null) {
+                    val negatedNumber = (-lastNumber).formatNumber()
+                    expression = expression.substring(0, lastNumberPosition) + negatedNumber
+                    displayText = expression
+                }
+            }
+        }
     }
 
     fun calculate() {
@@ -219,29 +284,78 @@ fun CalculatorScreen() {
         }
 
         // Display area (shrinks when history is open)
-        Card(
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .weight(if (showHistory) 0.3f else 1f),
-            colors = CardDefaults.cardColors(containerColor = CalcColors.Display)
+                .weight(if (showHistory) 0.3f else 1f)
         ) {
-            Column(
-                modifier = Modifier.fillMaxSize().padding(16.dp),
-                verticalArrangement = Arrangement.Bottom,
-                horizontalAlignment = Alignment.End
+            // Display Card
+            Card(
+                modifier = Modifier.fillMaxSize(),
+                colors = CardDefaults.cardColors(containerColor = CalcColors.Display)
+            ) {
+                Column(
+                    modifier = Modifier.fillMaxSize().padding(16.dp),
+                    verticalArrangement = Arrangement.Bottom,
+                    horizontalAlignment = Alignment.End
+                ) {
+                    Text(
+                        text = displayText,
+                        color = CalcColors.DisplayText,
+                        fontSize = 54.sp,
+                        textAlign = TextAlign.End,
+                        maxLines = 2
+                    )
+                }
+            }
+
+            // Advanced mode toggle button (overlaid on top-right corner)
+            Button(
+                onClick = { showAdvancedMode = !showAdvancedMode },
+                modifier = Modifier.align(Alignment.TopEnd).padding(12.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (showAdvancedMode) {
+                        CalcColors.OperatorBtn
+                    } else
+                        CalcColors.NumberBtn
+                ),
+                shape = RoundedCornerShape(10.dp)
             ) {
                 Text(
-                    text = displayText,
-                    color = CalcColors.DisplayText,
-                    fontSize = 54.sp,
-                    textAlign = TextAlign.End,
-                    maxLines = 2
+                    text = if (showAdvancedMode) "Toggle : Basic" else "Toggle : Advanced",
+                    color = CalcColors.BtnText,
+                    fontSize = 12.sp
                 )
             }
         }
 
         // Button grid
         Column(modifier = Modifier.fillMaxWidth()) {
+            //advanced buttons
+            if(showAdvancedMode) {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Row(modifier = Modifier.fillMaxWidth()) {
+                        CalcButton("sin", Modifier.weight(1f), Color(0xFF424242), height = 45.dp) { appendFunction("sin") }
+                        CalcButton("log", Modifier.weight(1f), Color(0xFF424242), height = 45.dp) { appendFunction("log10") }
+                        CalcButton("1/x", Modifier.weight(1f), Color(0xFF424242), height = 45.dp) { reciprocal() }
+                        CalcButton("π", Modifier.weight(1f), Color(0xFF424242), height = 45.dp) { appendConstant("π") }
+                    }
+
+                    Row(modifier = Modifier.fillMaxWidth()) {
+                        CalcButton("cos", Modifier.weight(1f), Color(0xFF424242), height = 45.dp) { appendFunction("cos") }
+                        CalcButton("ln", Modifier.weight(1f), Color(0xFF424242), height = 45.dp) { appendFunction("log") }
+                        CalcButton("√", Modifier.weight(1f), Color(0xFF424242), height = 45.dp) { appendFunction("sqrt") }
+                        CalcButton("e", Modifier.weight(1f), Color(0xFF424242), height = 45.dp) { appendConstant("e") }
+                    }
+
+                    Row(modifier = Modifier.fillMaxWidth()) {
+                        CalcButton("tan", Modifier.weight(1f), Color(0xFF424242), height = 45.dp) { appendFunction("tan") }
+                        CalcButton("", Modifier.weight(1f), Color(0xFF424242), height = 45.dp) {  }
+                        CalcButton("^", Modifier.weight(1f), Color(0xFF424242), height = 45.dp) { appendOperator("^") }
+                        CalcButton("( )", Modifier.weight(1f), Color(0xFF424242), height = 45.dp) { addParentheses() }
+                    }
+                }
+            }
 
             Row(modifier = Modifier.fillMaxWidth()) {
                 CalcButton("AC", Modifier.weight(1f), CalcColors.ClearBtn) { clear() }
@@ -272,7 +386,7 @@ fun CalculatorScreen() {
             }
 
             Row(modifier = Modifier.fillMaxWidth()) {
-                CalcButton("( )", Modifier.weight(1f), CalcColors.OperatorBtn) { addParentheses() }
+                CalcButton("+/-", Modifier.weight(1f), CalcColors.OperatorBtn) { toggleSign() }
                 CalcButton("0", Modifier.weight(1f), CalcColors.NumberBtn) { appendNumber("0") }
                 CalcButton(".", Modifier.weight(1f), CalcColors.NumberBtn) { appendNumber(".") }
                 CalcButton("=", Modifier.weight(1f), CalcColors.EqualsBtn) { calculate() }
@@ -287,18 +401,27 @@ fun CalcButton(
     text: String,
     modifier: Modifier = Modifier,
     backgroundColor: Color,
+    //default button height
+    height: Dp = 70.dp,
     onClick: () -> Unit
 ) {
     Button(
         onClick = onClick,
-        modifier = modifier.height(80.dp).padding(5.dp),
-        shape = RoundedCornerShape(50.dp),
+        modifier = modifier.padding(3.dp).height(height),
+        shape = RoundedCornerShape(10.dp),
         colors = ButtonDefaults.buttonColors(containerColor = backgroundColor),
+        contentPadding = PaddingValues(0.dp)
     ) {
-        Text(
-            text = text,
-            fontSize = 24.sp,
-            color = CalcColors.BtnText
-        )
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = text,
+                //allows the font size to differ between basic buttons and advanced buttons
+                fontSize = if (height < 70.dp) 24.sp else 34.sp,
+                color = CalcColors.BtnText
+            )
+        }
     }
 }
